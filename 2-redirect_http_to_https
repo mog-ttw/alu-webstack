@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Displays DNS info for subdomains (www, lb-01, web-01, web-02) of a domain or a single subdomain.
+
+# shellcheck disable=SC2086
+set -euo pipefail
+
+# Ensure dig is available
+if ! command -v dig >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y dnsutils
+  else
+    echo "dig not found and apt-get not available. Install dnsutils (bind-utils on some distros) and retry." >&2
+    exit 1
+  fi
+fi
+
+domain="${1:-}"
+subdomain="${2:-}"
+
+if [ -z "$domain" ]; then
+  cat <<USAGE >&2
+Usage: $0 domain [subdomain]
+  domain    : domain to audit (mandatory)
+  subdomain : optional subdomain to audit (example: web-02)
+When only domain is provided, the script checks: www, lb-01, web-01, web-02 (in that order).
+USAGE
+  exit 1
+fi
+
+# Function: query a single subdomain and print the required line
+query_sub() {
+  local sub="$1"
+  local fq="${sub}.${domain}"
+
+  # Use dig and extract the first answer line in the ANSWER SECTION
+  # Answer format typically: fqdn. TTL IN TYPE DEST
+  local ans_line
+  ans_line=$(dig "$fq" | awk '/ANSWER SECTION:/{getline; print}')
+
+  if [ -z "$ans_line" ]; then
+    # fallback: try +short and assume A record when +short returns an IP
+    local short
+    short=$(dig +short "$fq" | awk 'NR==1{print; exit}')
+    if [ -n "$short" ]; then
+      # assume A record when dig +short returns an IP address
+      printf "The subdomain %s is a A record and points to %s\n" "$sub" "$short"
+    else
+      # No answer found
+      printf "The subdomain %s is a %s record and points to %s\n" "$sub" "UNKNOWN" "UNKNOWN"
+    fi
+  else
+    # parse with awk: FIELD 4 = TYPE, FIELD 5 = DEST (works with usual dig output)
+    local rtype dest
+    rtype=$(echo "$ans_line" | awk '{print $4}')
+    dest=$(echo "$ans_line"  | awk '{print $5}')
+    printf "The subdomain %s is a %s record and points to %s\n" "$sub" "$rtype" "$dest"
+  fi
+}
+
+# If only domain provided, check the specific 4 subdomains in the required order
+if [ -z "$subdomain" ]; then
+  for s in www lb-01 web-01 web-02; do
+    query_sub "$s"
+  done
+else
+  query_sub "$subdomain"
+fi

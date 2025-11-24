@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Displays DNS information for required subdomains
+
+domain="$1"
+sub="$2"
+
+get_info() {
+    local full="${1}.${domain}"
+    dig "$full" | awk '/ANSWER SECTION/{getline; print}'
+}
+
+print_record() {
+    local name="$1"
+    local line
+    line="$(get_info "$name")"
+    local type dest
+    type=$(echo "$line" | awk '{print $4}')
+    dest=$(echo "$line" | awk '{print $5}')
+    echo "The subdomain ${name} is a ${type} record and points to ${dest}"
+}
+
+if [ -z "$domain" ]; then
+    echo "Usage: $0 domain [subdomain]"
+    exit 1
+fi
+
+if [ -z "$sub" ]; then
+    for s in www lb-01 web-01 web-02; do
+        print_record "$s"
+    done
+else
+    print_record "$sub"
+fi
